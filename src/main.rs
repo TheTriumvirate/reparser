@@ -1,43 +1,44 @@
+#![allow(unused_comparisons)]
+// NOTE: The above quells warnings arising due to unused comparisons in macro expansion, which is
+// otherwise impossible to remove
+
 #[macro_use]
 extern crate serde_derive;
 #[macro_use]
 extern crate nom;
-
 #[macro_use]
 extern crate structopt;
 
 extern crate failure;
-
 extern crate serde;
-extern crate serde_json;
 extern crate bincode;
 
 use std::fs::File;
 use std::io::prelude::*;
-use nom::be_f32;
-use std::env;
+use nom::{be_f32, le_f32};
 use failure::Error;
 
 use std::path::PathBuf;
 use structopt::StructOpt;
 
-const N_DIMEN  : usize = 7;
-const EPSILON  : f32   = 0.0000001;
-
 #[derive(StructOpt, Debug)]
 #[structopt(name = "basic")]
 struct Opt {
+    /// Present if input file uses little-endian encoding (defaults to big-endian)
+    #[structopt(long = "--little-endian")]
+    little_endian: bool,
+    
     /// Width of the model
     #[structopt(short = "w", long = "width")]
-    width: u32,
+    width: usize,
 
     /// Height of the model
     #[structopt(short = "h", long = "height")]
-    height: u32,
+    height: usize,
 
     /// Depth of the model
     #[structopt(short = "d", long = "depth")]
-    depth: u32,
+    depth: usize,
 
     /// Output file
     #[structopt(short = "o", long = "output", parse(from_os_str), default_value = "./out.bincode")]
@@ -48,70 +49,72 @@ struct Opt {
     file: PathBuf,
 }
 
-// big endian
-
-type Field = Vec<Vec<Vec<(f32,f32,f32)>>>;
+pub type Field = Vec<Vec<Vec<(f32,f32,f32)>>>;
 
 #[derive(Serialize, Deserialize)]
-struct VectorField {
+pub struct VectorField {
     field: Field,
 }
 
-named_args!(parse_be (sz:usize)<&[u8], Vec<f32> >, many_m_n!(0, sz, be_f32));
-
-fn main() -> Result<(), Error> {
-    let width    : usize = 38;  // 148;
-    let height   : usize = 39;  // 190;
-    let depth    : usize = 40;  // 160;
-    
-    let index = |i: usize, j: usize, k: usize, l: usize| -> usize {
-        i*height*width*N_DIMEN + j*width*N_DIMEN + k*N_DIMEN + l
-    };
-    let elem = |v: &Vec<f32>, i: usize, j: usize, k: usize, l: usize| -> f32 {
-        v[index(i,j,k,l)]
-    };
-    let construct_field = |v: &Vec<f32>| -> Field {
+impl VectorField {
+    pub fn confidence_weighted_235(width: usize, height: usize, depth: usize, ndim: usize, values: &Vec<f32>) -> Self {
+        const EPSILON : f32 = 0.0000001;
+        
         let mut data : Field = Vec::new();
-        let mut prev : usize = 0;
         for i in 0..depth {
             let mut plane = Vec::new();
             for j in 0..height {
                 let mut row = Vec::new();
                 for k in 0..width {
-                    let c = elem(&v,i,j,k,0); // confidence
-                    let dxx = elem(&v,i,j,k,1);
-                    let dxy = elem(&v,i,j,k,2);
-                    let dxz = elem(&v,i,j,k,3);
-                    let dyy = elem(&v,i,j,k,4);
-                    let dyz = elem(&v,i,j,k,5);
-                    let dzz = elem(&v,i,j,k,6);
-                    let mut x:f32 = c*(0.25*dxy + 0.25*dxz);
-                    let mut y:f32 = c*(0.25*dxy + 0.25*dyz);
-                    let mut z:f32 = c*(0.25*dxz + 0.25*dyz);
+                    let confidence: f32 = values[i*height*width*ndim+j*width*ndim+k*ndim+0];
+                    let _dxx : f32 = values[i*height*width*ndim+j*width*ndim+k*ndim+1];
+                    let dxy : f32 = values[i*height*width*ndim+j*width*ndim+k*ndim+2];
+                    let dxz : f32 = values[i*height*width*ndim+j*width*ndim+k*ndim+3];
+                    let _dyy : f32 = values[i*height*width*ndim+j*width*ndim+k*ndim+4];
+                    let dyz : f32 = values[i*height*width*ndim+j*width*ndim+k*ndim+5];
+                    let _dzz : f32 = values[i*height*width*ndim+j*width*ndim+k*ndim+6];
+                    
+                    let mut x:f32 = confidence*(0.5*dxy + 0.5*dxz);
+                    let mut y:f32 = confidence*(0.5*dxy + 0.5*dyz);
+                    let mut z:f32 = confidence*(0.5*dxz + 0.5*dyz);
+                    
                     // NOTE: zero out stuff that's close to zero, removes noise
                     if x.abs() < EPSILON { x = 0.0; }
                     if y.abs() < EPSILON { y = 0.0; }
                     if z.abs() < EPSILON { z = 0.0; }
-                    //println!("{}, {}, {}", x, y, z);
+                    
                     row.push((x,y,z));
                 }
                 plane.push(row);
             }
-            plane.reverse();
             data.push(plane);
         }
-        return data;
-    };
-    let mut opt = Opt::from_args();
+        VectorField { field: data }
+    }
+}
+
+named_args!(parse_be (sz:usize)<&[u8], Vec<f32> >, many_m_n!(0, sz, be_f32));
+named_args!(parse_le (sz:usize)<&[u8], Vec<f32> >, many_m_n!(0, sz, le_f32));
+
+fn main() -> Result<(), Error> {
+    let opt = Opt::from_args();
 
     let mut f = File::open(&opt.file)?;
     let mut contents: Vec<u8> = Vec::new();
 
     f.read_to_end(&mut contents)?;
-    match parse_be(&contents, width*height*depth*N_DIMEN) {
+    
+    match
+        if opt.little_endian {
+            parse_le(&contents, opt.width*opt.height*opt.depth*7)
+        } else {
+            parse_be(&contents, opt.width*opt.height*opt.depth*7)
+        }
+    {
         Ok((_, o)) =>  {
-            let s = bincode::serialize(&construct_field(&o))?;
-            std::fs::write("./out.bincode", &s)?;
+            let r = VectorField::confidence_weighted_235(opt.width as usize, opt.height as usize, opt.depth as usize, 7, &o);
+            let s = bincode::serialize(&r)?;
+            std::fs::write(&opt.output, &s)?;
             println!("Output written to {:?}", opt.output)
         }
         Err(e) => println!("{:?}", e),
