@@ -93,8 +93,8 @@ impl VectorField {
     }
 }
 
-named_args!(parse_be (sz:usize)<&[u8], Vec<f32> >, many_m_n!(0, sz, be_f32));
-named_args!(parse_le (sz:usize)<&[u8], Vec<f32> >, many_m_n!(0, sz, le_f32));
+named_args!(pub parse_be (sz:usize)<&[u8], Vec<f32> >, many_m_n!(0, sz, be_f32));
+named_args!(pub parse_le (sz:usize)<&[u8], Vec<f32> >, many_m_n!(0, sz, le_f32));
 
 fn main() -> Result<(), Error> {
     let opt = Opt::from_args();
