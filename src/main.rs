@@ -53,6 +53,9 @@ pub type Field = Vec<Vec<Vec<(f32,f32,f32)>>>;
 
 #[derive(Serialize, Deserialize)]
 pub struct VectorField {
+    width: usize,
+    height: usize,
+    depth: usize,
     field: Field,
 }
 
@@ -89,7 +92,7 @@ impl VectorField {
             }
             data.push(plane);
         }
-        VectorField { field: data }
+        VectorField { width, height, depth, field: data }
     }
 }
 
