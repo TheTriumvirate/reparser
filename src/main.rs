@@ -12,11 +12,13 @@ extern crate structopt;
 extern crate failure;
 extern crate serde;
 extern crate bincode;
+extern crate nalgebra as na;
 
 use std::fs::File;
 use std::io::prelude::*;
 use nom::{be_f32, le_f32};
 use failure::Error;
+use na::{Matrix3};
 
 use std::path::PathBuf;
 use structopt::StructOpt;
@@ -60,8 +62,11 @@ pub struct VectorField {
 }
 
 impl VectorField {
-    pub fn confidence_weighted_235(width: usize, height: usize, depth: usize, ndim: usize, values: &Vec<f32>) -> Self {
-        const EPSILON : f32 = 0.0000001;
+    pub fn from_eigenanalysis(width: usize, height: usize, depth: usize, values: &Vec<f32>) -> Self {
+        // difference between largest vector and the others, used as a measure
+        // of whether the data is useful or not
+        const EPSILON : f32 = 0.0001;
+        const NDIM : usize = 7;
         
         let mut data : Field = Vec::new();
         for i in 0..depth {
@@ -69,22 +74,40 @@ impl VectorField {
             for j in 0..height {
                 let mut row = Vec::new();
                 for k in 0..width {
-                    let confidence: f32 = values[i*height*width*ndim+j*width*ndim+k*ndim+0];
-                    let _dxx : f32 = values[i*height*width*ndim+j*width*ndim+k*ndim+1];
-                    let dxy : f32 = values[i*height*width*ndim+j*width*ndim+k*ndim+2];
-                    let dxz : f32 = values[i*height*width*ndim+j*width*ndim+k*ndim+3];
-                    let _dyy : f32 = values[i*height*width*ndim+j*width*ndim+k*ndim+4];
-                    let dyz : f32 = values[i*height*width*ndim+j*width*ndim+k*ndim+5];
-                    let _dzz : f32 = values[i*height*width*ndim+j*width*ndim+k*ndim+6];
+                    let confidence: f32 = values[i*height*width*NDIM+j*width*NDIM+k*NDIM+0];
+                    let dxx : f32 = values[i*height*width*NDIM+j*width*NDIM+k*NDIM+1];
+                    let dxy : f32 = values[i*height*width*NDIM+j*width*NDIM+k*NDIM+2];
+                    let dxz : f32 = values[i*height*width*NDIM+j*width*NDIM+k*NDIM+3];
+                    let dyy : f32 = values[i*height*width*NDIM+j*width*NDIM+k*NDIM+4];
+                    let dyz : f32 = values[i*height*width*NDIM+j*width*NDIM+k*NDIM+5];
+                    let dzz : f32 = values[i*height*width*NDIM+j*width*NDIM+k*NDIM+6];
+                    let mut x:f32 = 0.0;
+                    let mut y:f32 = 0.0;
+                    let mut z:f32 = 0.0;
                     
-                    let mut x:f32 = confidence*(0.5*dxy + 0.5*dxz);
-                    let mut y:f32 = confidence*(0.5*dxy + 0.5*dyz);
-                    let mut z:f32 = confidence*(0.5*dxz + 0.5*dyz);
-                    
-                    // NOTE: zero out stuff that's close to zero, removes noise
-                    if x.abs() < EPSILON { x = 0.0; }
-                    if y.abs() < EPSILON { y = 0.0; }
-                    if z.abs() < EPSILON { z = 0.0; }
+                    if confidence == 1.0 {
+                        let ds : Matrix3<f32> = Matrix3::new(dxx,dxy,dxz,
+                                                             dxy,dyy,dyz,
+                                                             dxz,dyz,dzz);
+                        let mut res = ds.symmetric_eigen();
+                        let mut max : f32 = res.eigenvalues.amax();
+                        let mut min : f32 = res.eigenvalues.amin();
+                        //println!("MAX: {}", max);
+                        //println!("MIN: {}", min);
+                        //println!("EIG: {}", res.eigenvalues);
+                        if max-min > EPSILON {
+                            let a = res.eigenvalues.iamax_full();
+                            //println!("IAMAX: {:?}", a.0);
+                            //println!("RES: {}", res.eigenvectors);
+                            let most_significant_vector = res.eigenvectors.column(a.0);
+                            //                         row  col
+                            x = most_significant_vector[(0,   0  )];
+                            y = most_significant_vector[(1,   0  )];
+                            z = most_significant_vector[(2,   0  )];
+                            //println!("x,y,z = {}, {}, {}", x, y, z);
+                        }
+                        if (x*x+y*y+z*z).sqrt() < EPSILON { x = 0.0; y = 0.0; z = 0.0; }
+                    }
                     
                     row.push((x,y,z));
                 }
@@ -115,7 +138,7 @@ fn main() -> Result<(), Error> {
         }
     {
         Ok((_, o)) =>  {
-            let r = VectorField::confidence_weighted_235(opt.width as usize, opt.height as usize, opt.depth as usize, 7, &o);
+            let r = VectorField::from_eigenanalysis(opt.width as usize, opt.height as usize, opt.depth as usize, &o);
             let s = bincode::serialize(&r)?;
             std::fs::write(&opt.output, &s)?;
             println!("Output written to {:?}", opt.output)
