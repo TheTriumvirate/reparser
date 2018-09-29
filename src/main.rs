@@ -103,9 +103,9 @@ impl VectorField {
                             //println!("RES: {}", res.eigenvectors);
                             let most_significant_vector = res.eigenvectors.column(a.0);
                             //                         row  col
-                            x = most_significant_vector[(0,   0  )];
-                            y = most_significant_vector[(1,   0  )];
-                            z = most_significant_vector[(2,   0  )];
+                            x = max*most_significant_vector[(0,   0  )];
+                            y = max*most_significant_vector[(1,   0  )];
+                            z = max*most_significant_vector[(2,   0  )];
                             //println!("x,y,z = {}, {}, {}", x, y, z);
                             if (x*x+y*y+z*z).sqrt() < EPSILON { x = 0.0; y = 0.0; z = 0.0; }
                         }
