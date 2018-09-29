@@ -65,7 +65,7 @@ impl VectorField {
     pub fn from_eigenanalysis(width: usize, height: usize, depth: usize, values: &Vec<f32>) -> Self {
         // difference between largest vector and the others, used as a measure
         // of whether the data is useful or not
-        const EPSILON : f32 = 0.0001;
+        const EPSILON : f32 = 0.000001;
         const NDIM : usize = 7;
         
         let mut data : Field = Vec::new();
@@ -90,12 +90,14 @@ impl VectorField {
                                                              dxy,dyy,dyz,
                                                              dxz,dyz,dzz);
                         let mut res = ds.symmetric_eigen();
-                        let mut max : f32 = res.eigenvalues.amax();
-                        let mut min : f32 = res.eigenvalues.amin();
+                        let mut ev_sorted = res.eigenvalues.iter().map(|&f| f.abs()).collect::<Vec<f32>>();
+                        ev_sorted.sort_by(|&a,&b| a.partial_cmp(&b).unwrap());
+                        let max = ev_sorted.pop().unwrap();
+                        let not_max = ev_sorted.pop().unwrap();
                         //println!("MAX: {}", max);
-                        //println!("MIN: {}", min);
-                        //println!("EIG: {}", res.eigenvalues);
-                        if max-min > EPSILON {
+                        //println!("NOT_MAX: {}", not_max);
+                        //println!("EIG: {:?}", res.eigenvalues);
+                        if max-not_max > EPSILON { // needle shaped tensor
                             let a = res.eigenvalues.iamax_full();
                             //println!("IAMAX: {:?}", a.0);
                             //println!("RES: {}", res.eigenvectors);
@@ -105,8 +107,8 @@ impl VectorField {
                             y = most_significant_vector[(1,   0  )];
                             z = most_significant_vector[(2,   0  )];
                             //println!("x,y,z = {}, {}, {}", x, y, z);
+                            if (x*x+y*y+z*z).sqrt() < EPSILON { x = 0.0; y = 0.0; z = 0.0; }
                         }
-                        if (x*x+y*y+z*z).sqrt() < EPSILON { x = 0.0; y = 0.0; z = 0.0; }
                     }
                     
                     row.push((x,y,z));
