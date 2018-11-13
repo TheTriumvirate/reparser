@@ -67,7 +67,7 @@ impl VectorField {
     pub fn from_eigenanalysis(width: usize, height: usize, depth: usize, values: &Vec<f32>) -> Self {
         // difference between largest vector and the others, used as a measure
         // of whether the data is useful or not
-        const FA_EPSILON : f32 = 0.2;
+        const FA_EPSILON : f32 = 0.0;
         const NDIM : usize = 7;
         
         let mut index: usize = 0;
