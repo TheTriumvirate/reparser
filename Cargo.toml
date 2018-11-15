@@ -1,6 +1,6 @@
 [package]
-name = "adhoc-parser"
-version = "0.1.0"
+name = "reparser"
+version = "0.2.0"
 authors = ["Vegard Ekblad Itland <Vegard.Itland@student.uib.no>"]
 
 [dependencies]
