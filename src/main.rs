@@ -328,6 +328,7 @@ impl VectorField {
 named_args!(pub parse_be (sz:usize)<&[u8], Vec<f32> >, many_m_n!(0, sz, be_f32));
 named_args!(pub parse_le (sz:usize)<&[u8], Vec<f32> >, many_m_n!(0, sz, le_f32));
 
+/// Return an Opt containing sizes, input file and endianness, and defaults for all other values
 pub fn load_opt_from_header(header: &PathBuf) -> Result<Opt, std::io::Error> {
     let h = File::open(&header)?;
     let br = BufReader::new(h);
@@ -337,7 +338,7 @@ pub fn load_opt_from_header(header: &PathBuf) -> Result<Opt, std::io::Error> {
     Ok(Opt::from_header_file(&lines))
 }
 
-/// Return the contents of the data file in bincode
+/// Return the contents of the data file pointed to by the NHDR header in bincode
 pub fn load_data_file_from_header(header: &PathBuf) -> Result<Vec<u8>, String> {
     let options_maybe = load_opt_from_header(header);
     match options_maybe {
@@ -346,6 +347,7 @@ pub fn load_data_file_from_header(header: &PathBuf) -> Result<Vec<u8>, String> {
     }
 }
 
+/// Returns the contents of the data file pointed to by opt.file in bincode
 pub fn load_data_file_from_opt(opt: &Opt) -> Result<Vec<u8>, String> {
     let mut f = match File::open(&opt.file) {
         Ok(f) => Ok(f),
