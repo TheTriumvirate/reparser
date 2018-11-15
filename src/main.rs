@@ -328,8 +328,9 @@ impl VectorField {
 named_args!(pub parse_be (sz:usize)<&[u8], Vec<f32> >, many_m_n!(0, sz, be_f32));
 named_args!(pub parse_le (sz:usize)<&[u8], Vec<f32> >, many_m_n!(0, sz, le_f32));
 
-/// Return an Opt containing sizes, input file and endianness, and defaults for all other values
-pub fn load_opt_from_header(header: &PathBuf) -> Result<Opt, std::io::Error> {
+/// Given a path to an NHDR header, return an Opt containing sizes, input file and endianness, and
+/// defaults for all other values
+pub fn load_opt_from_header_file(header: &PathBuf) -> Result<Opt, std::io::Error> {
     let h = File::open(&header)?;
     let br = BufReader::new(h);
 
@@ -338,14 +339,23 @@ pub fn load_opt_from_header(header: &PathBuf) -> Result<Opt, std::io::Error> {
     Ok(Opt::from_header_file(&lines))
 }
 
+/// Given the contents of a header, return an Opt containing sizes, input file and endianness, and
+/// defaults for all other values
+pub fn load_opt_from_header_string(header: &String) -> Result<Opt, std::io::Error> {
+    let mut lines: Vec<String> = Vec::new();
+    for ln in header.lines() { lines.push(ln.to_string()); }
+    Ok(Opt::from_header_file(&lines))
+}
+
 /// Return the contents of the data file pointed to by the NHDR header in bincode
-pub fn load_data_file_from_header(header: &PathBuf) -> Result<Vec<u8>, String> {
-    let options_maybe = load_opt_from_header(header);
+pub fn load_data_file_from_header_file(header: &PathBuf) -> Result<Vec<u8>, String> {
+    let options_maybe = load_opt_from_header_file(header);
     match options_maybe {
         Ok(opt) => load_data_file_from_opt(&opt),
         Err(_) => Err("Error loading header file".to_string()),
     }
 }
+
 
 /// Returns the contents of the data file pointed to by opt.file in bincode
 pub fn load_data_file_from_opt(opt: &Opt) -> Result<Vec<u8>, String> {
@@ -359,6 +369,11 @@ pub fn load_data_file_from_opt(opt: &Opt) -> Result<Vec<u8>, String> {
         Err(_) => Err("Error reading data file".to_string()),
     }?;
 
+    load_data_bytes_from_opt(&opt, &contents)
+}
+
+/// Returns the data given by contents in bincode
+pub fn load_data_bytes_from_opt(opt: &Opt, contents: &Vec<u8>) -> Result<Vec<u8>, String> {
     let mut s = vec![];
     match
         if opt.little_endian {
@@ -389,7 +404,7 @@ fn main() -> Result<(), String> {
 
     let s = match opt.header.clone() {
         Some(fpath) => {
-            let opt2 = match load_opt_from_header(&fpath) {
+            let opt2 = match load_opt_from_header_file(&fpath) {
                 Ok(o) => Ok(o),
                 Err(_) => Err("Error loading header file"),
             }?;
