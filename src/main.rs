@@ -9,6 +9,7 @@ extern crate nom;
 #[macro_use]
 extern crate structopt;
 
+
 extern crate failure;
 extern crate serde;
 extern crate bincode;
@@ -44,6 +45,7 @@ struct Opt {
     /// Depth of the model
     #[structopt(short = "d", long = "depth")]
     depth: usize, 
+    
     /// Output file
     #[structopt(short = "o", long = "output", parse(from_os_str), default_value = "./out.bincode")]
     output: PathBuf,
@@ -51,6 +53,18 @@ struct Opt {
     /// Input file
     #[structopt(name = "FILE", parse(from_os_str))]
     file: PathBuf,
+
+    /// How many seeding points to generate
+    #[structopt(short = "s", long = "number-of-seeding-points", default_value = "10")]
+    n_seeding_points: usize,
+    
+    /// Step size during seeding point generation
+    #[structopt(short = "S", long = "seeding-point-calculation-stepsize", default_value = "2")]
+    seeding_point_calculation_step_size: usize,
+    
+    /// Threshold for starting point directionality (product of 3x3x3 volume)
+    #[structopt(short = "T", long = "fa-volume-product-threshold", default_value = "0.01")]
+    fa_volume_product_threshold: f32,
 }
 
 pub type Field = Vec<Vec<Vec<(f32, f32,f32,f32)>>>;
@@ -61,6 +75,11 @@ pub struct VectorField {
     height: usize,
     depth: usize,
     field: Field,
+    directional: Vec<(f32,f32,f32)>,
+}
+
+fn distance(p1:(f32,f32,f32), p2:(f32,f32,f32)) -> f32 {
+    ((p1.0-p2.0).powf(2.0) + (p1.1-p2.1).powf(2.0) + (p1.2-p2.2).powf(2.0)).sqrt()
 }
 
 impl VectorField {
@@ -70,6 +89,7 @@ impl VectorField {
         const FA_EPSILON : f32 = 0.0;
         const NDIM : usize = 7;
         
+        // process the vector field
         let mut index: usize = 0;
         let mut data : Field = Vec::new();
         for ez in 0..depth {
@@ -108,9 +128,9 @@ impl VectorField {
                             let a = res.eigenvalues.iamax_full();
                             let most_significant_vector = res.eigenvectors.column(a.0);
                             //                         row  col
-                            x = most_significant_vector[(0,   0  )];
+                            z = most_significant_vector[(0,   0  )];
                             y = most_significant_vector[(1,   0  )];
-                            z = most_significant_vector[(2,   0  )];
+                            x = most_significant_vector[(2,   0  )];
                         }
                     }
                     
@@ -120,14 +140,128 @@ impl VectorField {
             }
             data.push(plane);
         }
-        
+
         if index+6 < width*height*depth-1 {
             
             println!("{} Last index visited was {}, but total number of floats was {}.",
                      "WARNING:".yellow().bold(), index+6, height*width*depth);
             println!("{:8} You probably fucked up how you do the dimensions", " ");
         }
-        VectorField { width, height, depth, field: data }
+        VectorField { width, height, depth, field: data, directional: Vec::new() }
+    }
+    
+    /// data extension: automatically find good seeding locations
+    pub fn calculate_seeding_points(&mut self, n_points: usize, step_size: usize, fa_area_threshold: f32) {
+        let mut pts: Vec<(f32, f32, f32)> = vec![];
+        
+        // automatically discover interesting areas to start seeding from by inspecting the length
+        // of the streamlines from that point.
+        let mut streamlines: Vec<Vec<usize>> = Vec::new();
+        for i in 0..n_points {
+            let mut best_streamline = Vec::new();
+            let mut best: (f32, f32, f32, f32, f32) = (-1.0, -1.0, -1.0, 0.0, 0.0,);
+            for z in (step_size..self.depth-step_size).step_by(step_size) {
+                for y in (step_size..self.height-step_size).step_by(step_size) {
+                    for x in (step_size..self.width-step_size).step_by(step_size) {
+                        let fx: f32 = x as f32;
+                        let fy: f32 = y as f32;
+                        let fz: f32 = z as f32;
+                        
+                        if pts.contains(&(fx,fy,fz)) {
+                            continue; // we already found this point
+                        }
+                        
+                        // reduce search space by only considering the areas which have several
+                        // strongly directional vectors in them
+                        let mut fa_combined: f32 = 1.0;
+                        for x1 in 0..2 {
+                            for y1 in 0..2 {
+                                for z1 in 0..2 {
+                                    fa_combined = fa_combined*self.field[(z+z1-1).min(self.depth-1)]
+                                                                  [(y+y1-1).min(self.height-1)]
+                                                                  [(x+x1-1).min(self.width-1)].3;
+                                }
+                            }
+                        }
+                        if fa_combined < fa_area_threshold { 
+                            //println!("Ignoring paths starting at point below threshold");
+                            continue;
+                        }
+                        
+                        // attempt at discovering the length of the streamline
+                        let mut this_streamline: Vec<usize> = Vec::new();
+                        let mut xpos = fx;
+                        let mut ypos = fy;
+                        let mut zpos = fz;
+                        const N_STEPS: usize = 1000;
+                        
+                        let mut skip: bool = false;
+                        'outer: for _step in 0..N_STEPS {
+                            // nearest interpolation
+                            let ux = (xpos as usize).min(self.width-1);
+                            let uy = (ypos as usize).min(self.height-1);
+                            let uz = (zpos as usize).min(self.depth-1);
+                            
+                            let flat = ux*self.height*self.depth + uy*self.depth + uz; // unique identifier for this point
+                            this_streamline.push(flat);
+                            
+                            // we want to discover starting points that will send particles down
+                            // different paths, so ignore starting points that don't
+                            for v in streamlines.iter() {
+                                if v.contains(&flat) {
+                                    //println!("Been down this path before");
+                                    skip = true;
+                                    break 'outer;
+                                }
+                            }
+                            
+                            // move forward one step
+                            let delta = self.field[uz][uy][ux];
+                            let fa = delta.3;
+
+                            // If particles hit a point where fa=0, they will be killed and
+                            // respawn. In order to ensure that we don't get a lot of stupid values
+                            // at the wrong places, skip such starting points.
+                            if fa == 0.0 {
+                                //println!("Particles on this path will die");
+                                skip = true;
+                                break 'outer;
+                            }
+                            xpos += fa*delta.0;
+                            ypos += fa*delta.1;
+                            zpos += fa*delta.2;
+                        }
+                        
+                        if !skip {
+                            let dist = distance((xpos,ypos,zpos), (fx,fy,fz));
+                            
+                            // we want to also take into account and maximize distance to points
+                            // we've found previously (so as to (hopefully) ensure that the paths
+                            // do not collide with each other)
+                            let mut sum : f32 = 0.0;
+                            for p in pts.iter() {
+                                sum += distance((fx,fy,fz), *p);
+                            }
+                            
+                            // magic formula
+                            if dist + dist*sum.powf((i as f32).sqrt()) > best.3 + best.3*best.4 {
+                                best = (fx, fy, fz, dist, sum.powf((i as f32).sqrt()));
+                                
+                                // store so we can check for direct path collisions later
+                                best_streamline = this_streamline;
+                            }
+                        }
+                    }
+                }
+            }
+            if best.0 > 0.0 {
+                streamlines.push(best_streamline.to_vec());
+                println!("Found point with best = {:?} and fa = {}", best, self.field[best.2 as usize][best.1 as usize][best.0 as usize].3);
+                pts.push((best.0,best.1,best.2));
+            }
+        }
+        
+        self.directional = pts;
     }
 }
 
@@ -150,7 +284,11 @@ fn main() -> Result<(), Error> {
         }
     {
         Ok((_, o)) =>  {
-            let r = VectorField::from_eigenanalysis(opt.width as usize, opt.height as usize, opt.depth as usize, &o);
+            let mut r = VectorField::from_eigenanalysis(opt.width as usize, opt.height as usize, opt.depth as usize, &o);
+            r.calculate_seeding_points(
+                opt.n_seeding_points,
+                opt.seeding_point_calculation_step_size,
+                opt.fa_volume_product_threshold);
             let s = bincode::serialize(&r)?;
             std::fs::write(&opt.output, &s)?;
             println!("Output written to {:?}", opt.output)
