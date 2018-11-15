@@ -20,8 +20,8 @@ extern crate colored; // warnings
 use colored::*;
 use std::fs::File;
 use std::io::prelude::*;
+use std::io::{BufReader};
 use nom::{be_f32, le_f32};
-use failure::Error;
 use na::{Matrix3};
 
 use std::path::PathBuf;
@@ -29,9 +29,9 @@ use structopt::StructOpt;
 
 #[derive(StructOpt, Debug)]
 #[structopt(name = "basic")]
-struct Opt {
+pub struct Opt {
     /// Present if input file uses little-endian encoding (defaults to big-endian)
-    #[structopt(long = "--little-endian")]
+    #[structopt(long = "little-endian")]
     little_endian: bool,
     
     /// Width of the model
@@ -65,6 +65,66 @@ struct Opt {
     /// Threshold for starting point directionality (product of 3x3x3 volume)
     #[structopt(short = "T", long = "fa-volume-product-threshold", default_value = "0.01")]
     fa_volume_product_threshold: f32,
+
+    /// Header file in order to automatically determine options
+    #[structopt(short = "H", long = "header-file", parse(from_os_str))]
+    header: Option<PathBuf>,
+}
+
+impl Opt {
+    pub fn from_header_file(lines: &Vec<String>) -> Self {
+        let mut width         = 0;
+        let mut height        = 0;
+        let mut depth         = 0;
+        let mut little_endian = false;
+        
+        let n_seeding_points                    = 10;
+        let seeding_point_calculation_step_size = 2;
+        let fa_volume_product_threshold         = 0.01;
+        
+        let mut file          = PathBuf::new();
+        let mut output        = PathBuf::new();
+        output.push("out.bincode");
+        
+        /*
+        parser: NHDRParser = NHDRParser::new();
+        parser.parse_ints_after("sizes: ");
+        parser.parse_string_after("endian: ");
+        parser.parse_string_after("data file: ");
+        */
+        
+        for ln in lines {
+            let mut s: String = ln.clone();
+            //parser.parse(s);
+            
+            if s.starts_with("sizes: ") {
+                let szs: Vec<usize> = s.drain("sizes: ".len()..).collect::<String>().split_whitespace().map(|e| e.parse().unwrap()).collect();
+                assert_eq!(4, szs.len());
+                assert_eq!(7, szs[0]);
+                width  = szs[1];
+                height = szs[2];
+                depth  = szs[3];
+            }
+            else if s.starts_with("endian: ") {
+                little_endian = s.drain("endian: ".len()..).collect::<String>() == "little";
+            }
+            else if s.starts_with("data file: ") {
+                file.push(s.drain("data file: ".len()..).collect::<String>());
+            }
+        }
+        Self {
+            little_endian                       : little_endian,
+            width                               : width,
+            height                              : height,
+            depth                               : depth,
+            output                              : output,
+            file                                : file,
+            n_seeding_points                    : n_seeding_points,
+            seeding_point_calculation_step_size : seeding_point_calculation_step_size,
+            fa_volume_product_threshold         : fa_volume_product_threshold,
+            header                              : None,
+        }
+    }
 }
 
 pub type Field = Vec<Vec<Vec<(f32, f32,f32,f32)>>>;
@@ -268,14 +328,36 @@ impl VectorField {
 named_args!(pub parse_be (sz:usize)<&[u8], Vec<f32> >, many_m_n!(0, sz, be_f32));
 named_args!(pub parse_le (sz:usize)<&[u8], Vec<f32> >, many_m_n!(0, sz, le_f32));
 
-fn main() -> Result<(), Error> {
-    let opt = Opt::from_args();
+pub fn load_opt_from_header(header: &PathBuf) -> Result<Opt, std::io::Error> {
+    let h = File::open(&header)?;
+    let br = BufReader::new(h);
 
-    let mut f = File::open(&opt.file)?;
+    let mut lines: Vec<String> = Vec::new();
+    for ln in br.lines() { lines.push(ln?); }
+    Ok(Opt::from_header_file(&lines))
+}
+
+/// Return the contents of the data file in bincode
+pub fn load_data_file_from_header(header: &PathBuf) -> Result<Vec<u8>, String> {
+    let options_maybe = load_opt_from_header(header);
+    match options_maybe {
+        Ok(opt) => load_data_file_from_opt(&opt),
+        Err(_) => Err("Error loading header file".to_string()),
+    }
+}
+
+pub fn load_data_file_from_opt(opt: &Opt) -> Result<Vec<u8>, String> {
+    let mut f = match File::open(&opt.file) {
+        Ok(f) => Ok(f),
+        Err(_) => Err("Error finding data file".to_string()),
+    }?;
     let mut contents: Vec<u8> = Vec::new();
+    match f.read_to_end(&mut contents) {
+        Ok(_) => Ok(()),
+        Err(_) => Err("Error reading data file".to_string()),
+    }?;
 
-    f.read_to_end(&mut contents)?;
-    
+    let mut s = vec![];
     match
         if opt.little_endian {
             parse_le(&contents, opt.width*opt.height*opt.depth*7)
@@ -289,11 +371,36 @@ fn main() -> Result<(), Error> {
                 opt.n_seeding_points,
                 opt.seeding_point_calculation_step_size,
                 opt.fa_volume_product_threshold);
-            let s = bincode::serialize(&r)?;
-            std::fs::write(&opt.output, &s)?;
-            println!("Output written to {:?}", opt.output)
+            s = match bincode::serialize(&r) {
+                Ok(s) => Ok(s),
+                Err(_) => Err("Error serializing data".to_string()),
+            }?;
         }
         Err(e) => println!("{:?}", e),
     }
-    Ok(())
+    Ok(s)
+}
+
+fn main() -> Result<(), String> {
+    let opt = Opt::from_args();
+    let mut output = opt.output.clone();
+
+    let s = match opt.header.clone() {
+        Some(fpath) => {
+            let opt2 = match load_opt_from_header(&fpath) {
+                Ok(o) => Ok(o),
+                Err(_) => Err("Error loading header file"),
+            }?;
+            output = opt2.output.clone();
+            load_data_file_from_opt(&opt2)
+        },
+        None => load_data_file_from_opt(&opt),
+    }?;
+    match std::fs::write(&output, &s) {
+        Ok(_) => {
+            println!("Output written to {:?}", output);
+            Ok(())
+        },
+        Err(_) => Err("Error writing to output file".to_string())
+    }
 }
