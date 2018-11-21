@@ -35,7 +35,9 @@ pub struct VectorField {
     directional: Vec<(f32,f32,f32)>,
 }
 impl VectorField {
-    pub fn from_eigenanalysis(width: usize, height: usize, depth: usize, values: &Vec<f32>) -> Self {
+    /// Construccts a vector field using eigenanalysis. Will panic if width/height/depth is out
+    /// of range of the values.
+    pub fn from_eigenanalysis(width: usize, height: usize, depth: usize, values: &[f32]) -> Self {
         // difference between largest vector and the others, used as a measure
         // of whether the data is useful or not
         const FA_EPSILON : f32 = 0.0;
@@ -98,9 +100,9 @@ impl VectorField {
 
         if largest+6 < width*height*depth-1 {
             
-            println!("{} Largest index visited was {}, but total number of floats was {}.",
+            eprintln!("{} Largest index visited was {}, but total number of floats was {}.",
                      "WARNING:".yellow().bold(), largest+6, height*width*depth);
-            println!("{:8} You probably fucked up how you do the dimensions", " ");
+            eprintln!("{:8} You probably fucked up how you do the dimensions", " ");
         }
         VectorField { width, height:depth, depth:height, field: data, directional: Vec::new() }
     }
@@ -248,22 +250,25 @@ pub struct Options {
 }
 
 impl Options {
-    pub fn from_header_file(lines: &Vec<String>) -> Self {
+
+    /// Given the contents of a header, return an Opt containing sizes, input file and endianness, and
+    /// defaults for all other values
+    pub fn load_opt_from_header_string(header: &str) -> Result<Options, std::io::Error> {
+        Ok(Options::from_header_file(header.lines()))
+    }
+    
+    pub fn from_header_file<'a>(lines: impl IntoIterator<Item = &'a str>) -> Self {
         let mut width         = 0;
         let mut height        = 0;
         let mut depth         = 0;
         let mut little_endian = false;
         let mut file = PathBuf::new();
         
-        let n_seeding_points                    = 10;
-        let seeding_point_calculation_step_size = 2;
-        let fa_volume_product_threshold         = 0.01;
-        
-        for ln in lines {
-            let mut s: String = ln.clone();
+        for s in lines {
+            //let mut s: String = ln.clone();
             
             if s.starts_with("sizes: ") {
-                let szs: Vec<usize> = s.drain("sizes: ".len()..).collect::<String>().split_whitespace().map(|e| e.parse().unwrap()).collect();
+                let szs: Vec<usize> = s.split_at("sizes: ".len()).1.split_whitespace().map(|e| e.parse().unwrap()).collect();
                 assert_eq!(4, szs.len());
                 assert_eq!(7, szs[0]);
                 width  = szs[1];
@@ -271,36 +276,41 @@ impl Options {
                 depth  = szs[3];
             }
             else if s.starts_with("endian: ") {
-                little_endian = s.drain("endian: ".len()..).collect::<String>() == "little";
+                little_endian = s.split_at("endian: ".len()).1 == "little";
             }
             else if s.starts_with("data file: ") {
-                file.push(s.drain("data file: ".len()..).collect::<String>());
+                file.push(s.split_at("data file: ".len()).1.to_owned());
             }
-
         }
+
         Self {
             file                                : if file.components().count() == 0 { None } else { Some(file) },
             little_endian                       : little_endian,
             width                               : width,
             height                              : height,
             depth                               : depth,
-            n_seeding_points                    : n_seeding_points,
-            seeding_point_calculation_step_size : seeding_point_calculation_step_size,
-            fa_volume_product_threshold         : fa_volume_product_threshold,
+            ..Default::default()
+        }
+    }
+}
+
+impl Default for Options {
+    fn default() -> Options {
+        Options {
+            file                                : None,
+            little_endian                       : false,
+            width                               : 0,
+            height                              : 0,
+            depth                               : 0,
+            n_seeding_points                    : 10,
+            seeding_point_calculation_step_size : 2,
+            fa_volume_product_threshold         : 0.01,
         }
     }
 }
 
 named_args!(pub parse_be (sz:usize)<&[u8], Vec<f32> >, many_m_n!(0, sz, be_f32));
 named_args!(pub parse_le (sz:usize)<&[u8], Vec<f32> >, many_m_n!(0, sz, le_f32));
-
-/// Given the contents of a header, return an Opt containing sizes, input file and endianness, and
-/// defaults for all other values
-pub fn load_opt_from_header_string(header: &str) -> Result<Options, std::io::Error> {
-    let mut lines: Vec<String> = Vec::new();
-    for ln in header.lines() { lines.push(ln.to_string()); }
-    Ok(Options::from_header_file(&lines))
-}
 
 /// Returns the data given by contents in bincode
 pub fn load_data_bytes_from_opt(opt: &Options, contents: &[u8]) -> Result<Vec<u8>, String> {

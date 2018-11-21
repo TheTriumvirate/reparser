@@ -89,7 +89,7 @@ fn load_opt_from_header_file(header: &PathBuf) -> Result<Options, std::io::Error
 
     let mut lines: Vec<String> = Vec::new();
     for ln in br.lines() { lines.push(ln?); }
-    Ok(Options::from_header_file(&lines))
+    Ok(Options::from_header_file(lines.iter().map(|s| s.as_ref())))
 }
 
 // NOTE: Removed for the sake of fewer warnings
