@@ -5,26 +5,19 @@
 extern crate reparser;
 
 #[macro_use]
-extern crate serde_derive;
-#[macro_use]
-extern crate nom;
-#[macro_use]
 extern crate structopt;
 
 extern crate failure;
 extern crate serde;
 extern crate bincode;
-extern crate nalgebra as na;
 
 extern crate colored; // warnings
 
 use reparser::*;
-use colored::*;
+//use colored::*; // NOTE: The println should be here :O
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::{BufReader};
-use nom::{be_f32, le_f32};
-use na::{Matrix3};
 
 use std::path::PathBuf;
 use structopt::StructOpt;
@@ -74,9 +67,10 @@ pub struct Opt {
 }
 
 impl Into<Options> for Opt {
-    fn into(&self) -> Options {
+    fn into(self) -> Options {
         Options{
             little_endian: self.little_endian,
+            file: Some(self.file),
             width: self.width,
             height: self.height,
             depth: self.depth,
@@ -89,15 +83,17 @@ impl Into<Options> for Opt {
 
 /// Given a path to an NHDR header, return an Opt containing sizes, input file and endianness, and
 /// defaults for all other values
-fn load_opt_from_header_file(header: &PathBuf) -> Result<Opt, std::io::Error> {
+fn load_opt_from_header_file(header: &PathBuf) -> Result<Options, std::io::Error> {
     let h = File::open(&header)?;
     let br = BufReader::new(h);
 
     let mut lines: Vec<String> = Vec::new();
     for ln in br.lines() { lines.push(ln?); }
-    Ok(Opt::from_header_file(&lines))
+    Ok(Options::from_header_file(&lines))
 }
 
+// NOTE: Removed for the sake of fewer warnings
+/*
 /// Return the contents of the data file pointed to by the NHDR header in bincode
 fn load_data_file_from_header_file(header: &PathBuf) -> Result<Vec<u8>, String> {
     let options_maybe = load_opt_from_header_file(header);
@@ -106,11 +102,18 @@ fn load_data_file_from_header_file(header: &PathBuf) -> Result<Vec<u8>, String> 
         Err(_) => Err("Error loading header file".to_string()),
     }
 }
+*/
 
 
 /// Returns the contents of the data file pointed to by opt.file in bincode
-fn load_data_file_from_opt(opt: &Opt) -> Result<Vec<u8>, String> {
-    let mut f = match File::open(&opt.file) {
+fn load_data_file_from_opt(opt: &Options) -> Result<Vec<u8>, String> {
+    let file = match &opt.file {
+        Some(x) => x,
+        // Shit, I should have realized before that I could just add "return"
+        None => return Err("Error: No file given".to_string()),
+    };
+    
+    let mut f = match File::open(&file) {
         Ok(f) => Ok(f),
         Err(_) => Err("Error finding data file".to_string()),
     }?;
@@ -126,7 +129,7 @@ fn load_data_file_from_opt(opt: &Opt) -> Result<Vec<u8>, String> {
 
 fn main() -> Result<(), String> {
     let opt = Opt::from_args();
-    let mut output = opt.output.clone();
+    let output = opt.output.clone();
 
     let s = match opt.header.clone() {
         Some(fpath) => {
@@ -134,10 +137,13 @@ fn main() -> Result<(), String> {
                 Ok(o) => Ok(o),
                 Err(_) => Err("Error loading header file"),
             }?;
-            output = opt2.output.clone();
+            
+            // NOTE: No longer applicable
+            //output = opt2.output.clone();
+
             load_data_file_from_opt(&opt2)
         },
-        None => load_data_file_from_opt(&opt),
+        None => load_data_file_from_opt(&opt.into()),
     }?;
     match std::fs::write(&output, &s) {
         Ok(_) => {

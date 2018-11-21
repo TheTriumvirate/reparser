@@ -6,8 +6,6 @@
 extern crate serde_derive;
 #[macro_use]
 extern crate nom;
-#[macro_use]
-extern crate structopt;
 
 extern crate failure;
 extern crate serde;
@@ -17,14 +15,10 @@ extern crate nalgebra as na;
 extern crate colored; // warnings
 
 use colored::*;
-use std::fs::File;
-use std::io::prelude::*;
-use std::io::{BufReader};
 use nom::{be_f32, le_f32};
 use na::{Matrix3};
 
 use std::path::PathBuf;
-use structopt::StructOpt;
 
 type Field = Vec<Vec<Vec<(f32, f32,f32,f32)>>>;
 
@@ -47,15 +41,17 @@ impl VectorField {
         const FA_EPSILON : f32 = 0.0;
         const NDIM : usize = 7;
         
+        let mut largest = 0;
         // process the vector field
-        let mut index: usize = 0;
+        // WARNING: HERE BE DRAGONS
         let mut data : Field = Vec::new();
-        for ez in 0..depth {
+        for ey in 0..height {
             let mut plane = Vec::new();
-            for ey in 0..height {
+            for ez in (0..depth).rev() {
                 let mut row = Vec::new();
                 for ex in 0..width {
-                    index = ez*width*height*NDIM + ey*width*NDIM + ex*NDIM;
+                    let index = ez*width*height*NDIM + ey*width*NDIM + ex*NDIM;
+                    largest = largest.max(index);
                     let confidence: f32 = values[index];
                     let dxx : f32 = values[index+1];
                     let dxy : f32 = values[index+2];
@@ -87,8 +83,9 @@ impl VectorField {
                             let most_significant_vector = res.eigenvectors.column(a.0);
                             //                         row  col
                             z = most_significant_vector[(0,   0  )];
-                            y = most_significant_vector[(1,   0  )];
-                            x = most_significant_vector[(2,   0  )];
+                            x = most_significant_vector[(1,   0  )];
+                            y = most_significant_vector[(2,   0  )];
+                            // NOTE: This is all fucked up now
                         }
                     }
                     
@@ -99,13 +96,13 @@ impl VectorField {
             data.push(plane);
         }
 
-        if index+6 < width*height*depth-1 {
+        if largest+6 < width*height*depth-1 {
             
-            println!("{} Last index visited was {}, but total number of floats was {}.",
-                     "WARNING:".yellow().bold(), index+6, height*width*depth);
+            println!("{} Largest index visited was {}, but total number of floats was {}.",
+                     "WARNING:".yellow().bold(), largest+6, height*width*depth);
             println!("{:8} You probably fucked up how you do the dimensions", " ");
         }
-        VectorField { width, height, depth, field: data, directional: Vec::new() }
+        VectorField { width, height:depth, depth:height, field: data, directional: Vec::new() }
     }
     
     /// data extension: automatically find good seeding locations
@@ -118,8 +115,8 @@ impl VectorField {
         for i in 0..n_points {
             let mut best_streamline = Vec::new();
             let mut best: (f32, f32, f32, f32, f32) = (-1.0, -1.0, -1.0, 0.0, 0.0,);
-            for z in (step_size..self.depth-step_size).step_by(step_size) {
-                for y in (step_size..self.height-step_size).step_by(step_size) {
+            for y in (step_size..self.height-step_size).step_by(step_size) {
+                for z in (step_size..self.depth-step_size).step_by(step_size) {
                     for x in (step_size..self.width-step_size).step_by(step_size) {
                         let fx: f32 = x as f32;
                         let fy: f32 = y as f32;
@@ -136,8 +133,8 @@ impl VectorField {
                             for y1 in 0..2 {
                                 for z1 in 0..2 {
                                     fa_combined = fa_combined*self.field[(z+z1-1).min(self.depth-1)]
-                                                                  [(y+y1-1).min(self.height-1)]
-                                                                  [(x+x1-1).min(self.width-1)].3;
+                                                                  [(x+x1-1).min(self.height-1)]
+                                                                  [(y+y1-1).min(self.width-1)].3;
                                 }
                             }
                         }
@@ -174,7 +171,7 @@ impl VectorField {
                             }
                             
                             // move forward one step
-                            let delta = self.field[uz][uy][ux];
+                            let delta = self.field[uz][ux][uy];
                             let fa = delta.3;
 
                             // If particles hit a point where fa=0, they will be killed and
@@ -214,7 +211,7 @@ impl VectorField {
             }
             if best.0 > 0.0 {
                 streamlines.push(best_streamline.to_vec());
-                println!("Found point with best = {:?} and fa = {}", best, self.field[best.2 as usize][best.1 as usize][best.0 as usize].3);
+                println!("Found point with best = {:?} and fa = {}", best, self.field[best.2 as usize][best.0 as usize][best.1 as usize].3);
                 pts.push((best.0,best.1,best.2));
             }
         }
