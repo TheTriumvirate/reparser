@@ -257,7 +257,7 @@ impl Options {
         Ok(Options::from_header_file(header.lines()))
     }
     
-    pub fn from_header_file<'a>(lines: impl IntoIterator<Item = &'a str>) -> Self {
+    pub fn from_header_file(lines: impl IntoIterator<Item = impl AsRef<str>>) -> Self {
         let mut width         = 0;
         let mut height        = 0;
         let mut depth         = 0;
@@ -265,7 +265,7 @@ impl Options {
         let mut file = PathBuf::new();
         
         for s in lines {
-            //let mut s: String = ln.clone();
+            let s = s.as_ref();
             
             if s.starts_with("sizes: ") {
                 let szs: Vec<usize> = s.split_at("sizes: ".len()).1.split_whitespace().map(|e| e.parse().unwrap()).collect();
