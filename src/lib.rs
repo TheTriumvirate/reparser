@@ -63,7 +63,7 @@ impl VectorField {
 
                     let mut fa:f32 = 0.0;
                     
-                    if confidence == 1.0 {
+                    if (confidence - 1.0) < 0.01 {
                         let ds : Matrix3<f32> = Matrix3::new(dxx,dxy,dxz,
                                                              dxy,dyy,dyz,
                                                              dxz,dyz,dzz);
@@ -130,9 +130,9 @@ impl VectorField {
                         for x1 in 0..2 {
                             for y1 in 0..2 {
                                 for z1 in 0..2 {
-                                    fa_combined = fa_combined*self.field[(z+z1-1).min(self.depth-1)]
-                                                                  [(x+x1-1).min(self.height-1)]
-                                                                  [(y+y1-1).min(self.width-1)].3;
+                                    fa_combined *= self.field[(z+z1-1).min(self.depth-1)]
+                                                             [(x+x1-1).min(self.height-1)]
+                                                             [(y+y1-1).min(self.width-1)].3;
                                 }
                             }
                         }
@@ -280,11 +280,11 @@ impl Options {
         }
 
         Self {
-            file                                : if file.components().count() == 0 { None } else { Some(file) },
-            little_endian                       : little_endian,
-            width                               : width,
-            height                              : height,
-            depth                               : depth,
+            file: if file.components().count() == 0 { None } else { Some(file) },
+            little_endian,
+            width,
+            height,
+            depth,
             ..Default::default()
         }
     }
