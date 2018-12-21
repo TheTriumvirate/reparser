@@ -2,14 +2,15 @@
 name = "reparser"
 version = "0.2.0"
 authors = ["Vegard Ekblad Itland <Vegard.Itland@student.uib.no>"]
+edition = "2018"
 
 [dependencies]
 serde = "1.0"
 serde_derive = "1.0"
 serde_json = "1.0"
-nom = "4.0"
+nom = "4"
 bincode = "1.0"
 structopt = "0.2"
 failure = "0.1"
-nalgebra = "0.16.0"
+nalgebra = "0.16"
 colored = "1.6"

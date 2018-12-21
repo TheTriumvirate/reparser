@@ -2,22 +2,18 @@
 // NOTE: The above quells warnings arising due to unused comparisons in macro expansion, which is
 // otherwise impossible to remove
 
-#[macro_use]
 extern crate serde_derive;
-#[macro_use]
 extern crate nom;
-
 extern crate failure;
 extern crate serde;
 extern crate bincode;
 extern crate nalgebra as na;
-
 extern crate colored; // warnings
 
 use colored::*;
-use nom::{be_f32, le_f32};
+use nom::{be_f32, le_f32, many_m_n, named_args, error_position, call};
 use na::{Matrix3};
-
+use serde_derive::{Serialize, Deserialize};
 use std::path::PathBuf;
 
 type Field = Vec<Vec<Vec<(f32, f32,f32,f32)>>>;
@@ -71,7 +67,7 @@ impl VectorField {
                         let ds : Matrix3<f32> = Matrix3::new(dxx,dxy,dxz,
                                                              dxy,dyy,dyz,
                                                              dxz,dyz,dzz);
-                        let mut res = ds.symmetric_eigen();
+                        let res = ds.symmetric_eigen();
                         let mut ev_sorted = res.eigenvalues.iter().map(|&f| f.abs()).collect::<Vec<f32>>();
                         ev_sorted.sort_by(|&a,&b| a.partial_cmp(&b).unwrap());
                         let l1 = ev_sorted.pop().unwrap();

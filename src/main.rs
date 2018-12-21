@@ -3,18 +3,13 @@
 // otherwise impossible to remove
 
 extern crate reparser;
-
-#[macro_use]
 extern crate structopt;
-
 extern crate failure;
 extern crate serde;
 extern crate bincode;
-
-extern crate colored; // warnings
+extern crate colored;
 
 use reparser::*;
-//use colored::*; // NOTE: The println should be here :O
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::{BufReader};
